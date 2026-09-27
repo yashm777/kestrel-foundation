@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kestrel"
+version = "0.1.0"
+description = "Kestrel Provisions analytical foundation"
+requires-python = ">=3.10"
+dependencies = [
+  "duckdb>=1.0",
+  "pyarrow",
+  "pandas",
+  "numpy",
+  "pyyaml",
+]
+
+[project.scripts]
+kestrel = "kestrel.__main__:main"
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
