@@ -1,0 +1,179 @@
+kpis:
+  - id: gross_sales
+    name: Gross sales
+    owner: Finance
+    grain: POS line, then any date/channel rollup
+    definition: >
+      Quantity times unit price on a deduplicated POS line, tax exclusive.
+      Business date is Asia/Kolkata from event_ts (UTC). Discount is stored
+      separately and is not subtracted. Channel for the canonical board figure
+      is the outlet SCD2 channel valid at event time; till_channel is retained
+      for Finance recon.
+    filters: Deduplicate on txn_id + txn_line_no. No cancelled-line flag exists.
+    sources: [pos_transactions, erp_cdc/outlet_master, fiscal_calendar]
+    limitation: POS includes GT and HORECA despite the contract saying MT and e-com partners.
+    sql: metrics/q01_gross_sales_by_channel.sql
+
+  - id: units_eaches
+    name: Units sold in eaches
+    owner: Finance
+    grain: POS line
+    definition: >
+      Converted units where UOM is known. EA lines count as eaches. CS lines
+      multiply by uom_conversion.eaches_per_case, else product case_pack.
+      Lines with conversion_status UNKNOWN are excluded from the units total
+      and kept in gross sales.
+    filters: conversion_status = CONVERTED. Pre-2025-10-01 POS has no uom column.
+    sources: [pos_transactions, reference/uom_conversion, erp_cdc/product_master]
+    limitation: Before the Oct 2025 schema change, CS vs EA is unknowable.
+    sql: metrics/q03_units_eaches.sql
+
+  - id: finance_recon
+    name: Finance weekly reconciliation
+    owner: Finance
+    grain: report_week × channel
+    definition: >
+      Three series — canonical (event week, deduped), legacy method (ingest week,
+      not deduped), published CSV — plus pairwise gaps and a split of canonical
+      vs legacy into duplicate impact and ingest-date attribution.
+    filters: Till channel, to isolate date and duplicate effects from SCD2.
+    sources: [pos_transactions, reference/legacy_finance_weekly_report]
+    limitation: >
+      The published CSV may not be a function of POS at all. If so, that is the
+      finding, not a pipeline failure.
+    sql: metrics/q02_finance_recon.sql
+
+  - id: chilled_above_limit_rate
+    name: Chilled trip above-limit rate
+    owner: Supply Chain
+    grain: telemetry trip proxy (vehicle + route + business date)
+    definition: >
+      Share of trips with at least one valid Celsius reading strictly above 8°C.
+      Matches the feed-contract definition of an excursion (above the 2–8 band).
+      outside_band_flag is stored but is not this KPI.
+    filters: Trips with at least one non-null temperature_c. Null readings dropped.
+    sources: [reefer_telemetry]
+    limitation: >
+      No carrier_id exists; we will not invent a join to carrier_master.
+      Trip is a derived proxy and collapses two same-day rotations.
+    sql: metrics/q04_cold_chain_excursion.sql
+
+  - id: median_dock_to_dispatch
+    name: Median dock-to-dispatch cycle time
+    owner: Supply Chain
+    grain: order_number, rolled to warehouse
+    definition: >
+      Median seconds from first RECEIVE to first DISPATCH on the same
+      order_number, only where both exist and dispatch is not before receive.
+    filters: complete_journey = true. Coverage is reported alongside the median.
+    sources: [wms_scan_events]
+    limitation: Handhelds drop scans; treat as indicative. Random source stitching.
+    sql: metrics/q05_wms_cycle_time.sql
+
+  - id: outlet_channel_changes
+    name: Outlet channel classification changes
+    owner: Commercial
+    grain: one row per consecutive SCD2 version pair with a channel change
+    definition: Outlets whose CDC channel attribute changed, and when.
+    filters: None
+    sources: [erp_cdc/outlet_master]
+    limitation: Relies on CDC completeness; last-file-wins would miss late extracts.
+    sql: metrics/q06_outlet_channel_changes.sql
+
+  - id: order_value_by_source
+    name: Order value by source system
+    owner: Finance
+    grain: source_system on current non-deleted order headers
+    definition: >
+      Sum of order_value_gross from ERP headers (not POS). PARTNER_API also
+      shown after dividing by 1.085 as a suspected freight adjustment.
+    filters: Latest CDC row per order_number; deleted orders excluded.
+    sources: [erp_cdc/sales_order_header]
+    limitation: Orders are not sales. The three sources are not comparable to POS.
+    sql: metrics/q07_order_source.sql
+
+  - id: feed_completeness
+    name: Feed completeness and missing days
+    owner: Data platform
+    grain: feed × partition, and gateway × date for telemetry
+    definition: >
+      Manifest vs observed files/rows; unreadable parquet; gateway-date combos
+      with zero readings. This is how a silent gateway outage is found.
+    filters: None
+    sources: [all raw feeds, _manifest/expected_partitions]
+    limitation: Manifest does not cover ERP CDC.
+    sql: metrics/q08_missing_days.sql
+
+  - id: dispatch_on_request_proxy
+    name: Dispatch-on-request-date proxy
+    owner: Supply Chain
+    grain: current order header
+    definition: >
+      Share of orders with a WMS DISPATCH on or before requested_delivery_date,
+      among orders that have a DISPATCH scan. Coverage is the share with any scan.
+      This is not OTIF and is not named service level.
+    filters: Non-deleted current order headers.
+    sources: [erp_cdc/sales_order_header, wms_scan_events]
+    limitation: WMS order_number is weakly related to ERP; coverage will be low.
+    sql: metrics/q10_dispatch_proxy.sql
+
+queries:
+  - id: q01_gross_sales_by_channel
+    description: Gross sales by as-of outlet channel for a fiscal year and quarter
+    sql: metrics/q01_gross_sales_by_channel.sql
+    source: fct_sales_daily
+    params: [fy, quarter]
+
+  - id: q02_finance_recon
+    description: Canonical vs legacy-method vs published Finance weekly, with gap split
+    sql: metrics/q02_finance_recon.sql
+    source: fct_finance_recon
+    params: []
+
+  - id: q03_units_eaches
+    description: Units in eaches last complete calendar month in the warehouse
+    sql: metrics/q03_units_eaches.sql
+    source: fct_pos_line
+    params: []
+
+  - id: q04_cold_chain_excursion
+    description: Above-8C trip rate by month, warehouse, vendor (no carrier key exists)
+    sql: metrics/q04_cold_chain_excursion.sql
+    source: fct_cold_chain_trip
+    params: []
+
+  - id: q05_wms_cycle_time
+    description: Median dock-to-dispatch seconds by warehouse, with coverage
+    sql: metrics/q05_wms_cycle_time.sql
+    source: fct_wms_cycle_warehouse
+    params: []
+
+  - id: q06_outlet_channel_changes
+    description: Outlets that changed channel classification, and when
+    sql: metrics/q06_outlet_channel_changes.sql
+    source: fct_outlet_channel_change
+    params: []
+
+  - id: q07_order_source
+    description: Order header value by source system, raw vs suspected-freight-adjusted
+    sql: metrics/q07_order_source.sql
+    source: fct_order_source
+    params: []
+
+  - id: q08_missing_days
+    description: Corrupt files, partition vs manifest, missing gateway-days
+    sql: metrics/q08_missing_days.sql
+    source: dq_missing_gateway_days
+    params: []
+
+  - id: q09_recon_drilldown
+    description: Canonical POS lines behind one Finance report week and till channel
+    sql: metrics/q09_recon_drilldown.sql
+    source: fct_pos_line
+    params: [week, channel]
+
+  - id: q10_dispatch_proxy
+    description: Dispatch-on-request-date proxy with coverage (not OTIF)
+    sql: metrics/q10_dispatch_proxy.sql
+    source: fct_dispatch_on_request
+    params: []
