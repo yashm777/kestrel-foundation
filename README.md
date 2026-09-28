@@ -50,8 +50,6 @@ python -m kestrel run --data-dir data --out warehouse/kestrel.duckdb --allow-deg
 | KPI definitions | `catalogue/kpis.yml` |
 | Runnable questions | `sql/metrics/` |
 
-Do not commit `data/` or `warehouse/`. Regenerating with the vendored generator (seed `20260811`) reproduces the assignment dataset. `--scale 10` writes a larger copy (`--out data_10x`); the SQL is partition-aware via Hive paths but a full 10× load will pressure a laptop.
-
 ## Tests
 
 ```bash
