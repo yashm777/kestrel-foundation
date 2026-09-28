@@ -1,5 +1,6 @@
 -- SCD2 from CDC. Order by commit time then capture sequence, not extract file arrival.
 -- I/U rows become versions; D closes the prior version via LEAD on the full stream.
+-- A same-timestamp pair would be a zero-length version; __seq keeps the later row only.
 CREATE OR REPLACE TABLE dim_outlet_scd2 AS
 WITH parsed AS (
   SELECT
@@ -44,4 +45,5 @@ SELECT
   op_ts AS valid_from,
   coalesce(next_ts, TIMESTAMP '9999-12-31 00:00:00') AS valid_to
 FROM ordered
-WHERE __op IN ('I', 'U');
+WHERE __op IN ('I', 'U')
+  AND op_ts < coalesce(next_ts, TIMESTAMP '9999-12-31 00:00:00');

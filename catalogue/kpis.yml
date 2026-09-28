@@ -11,7 +11,9 @@ kpis:
       for Finance recon.
     filters: Deduplicate on txn_id + txn_line_no. No cancelled-line flag exists.
     sources: [pos_transactions, erp_cdc/outlet_master, fiscal_calendar]
-    limitation: POS includes GT and HORECA despite the contract saying MT and e-com partners.
+    limitation: >
+      POS includes GT and HORECA despite the contract saying MT and e-com partners.
+      Lines with no outlet version at event time fall back to till_channel (about 0.5%).
     sql: metrics/q01_gross_sales_by_channel.sql
 
   - id: units_eaches
@@ -46,16 +48,19 @@ kpis:
   - id: chilled_above_limit_rate
     name: Chilled trip above-limit rate
     owner: Supply Chain
-    grain: telemetry trip proxy (vehicle + route + business date)
+    grain: vehicle + route + corrected device-clock date
     definition: >
-      Share of trips with at least one valid Celsius reading strictly above 8°C.
+      Share of keys with at least one valid Celsius reading strictly above 8°C.
       Matches the feed-contract definition of an excursion (above the 2–8 band).
       outside_band_flag is stored but is not this KPI.
-    filters: Trips with at least one non-null temperature_c. Null readings dropped.
+    filters: Keys with at least one non-null temperature_c. Null readings dropped.
     sources: [reefer_telemetry]
     limitation: >
       No carrier_id exists; we will not invent a join to carrier_master.
-      Trip is a derived proxy and collapses two same-day rotations.
+      route_code changes on nearly every reading, so this is a reading-level
+      rate (about 7%), not a vehicle-day rate (that grain is about 75%).
+      Leaving Fahrenheit unconverted produces about 38%, close to "a third",
+      because COLDEYE is about a third of devices.
     sql: metrics/q04_cold_chain_excursion.sql
 
   - id: median_dock_to_dispatch
@@ -67,7 +72,10 @@ kpis:
       order_number, only where both exist and dispatch is not before receive.
     filters: complete_journey = true. Coverage is reported alongside the median.
     sources: [wms_scan_events]
-    limitation: Handhelds drop scans; treat as indicative. Random source stitching.
+    limitation: >
+      Not a usable cycle time. Scans sharing an order_number span many months
+      and several warehouses, so the median is on the order of months.
+      Read coverage_pct. Handheld dropouts are a smaller second problem.
     sql: metrics/q05_wms_cycle_time.sql
 
   - id: outlet_channel_changes
@@ -87,7 +95,9 @@ kpis:
     definition: >
       Sum of order_value_gross from ERP headers (not POS). PARTNER_API also
       shown after dividing by 1.085 as a suspected freight adjustment.
-    filters: Latest CDC row per order_number; deleted orders excluded.
+    filters: >
+      Latest I/U by (__op_ts, __seq). A delete with the highest __seq is excluded
+      even when it copies the insert timestamp.
     sources: [erp_cdc/sales_order_header]
     limitation: Orders are not sales. The three sources are not comparable to POS.
     sql: metrics/q07_order_source.sql
@@ -101,7 +111,9 @@ kpis:
       with zero readings. This is how a silent gateway outage is found.
     filters: None
     sources: [all raw feeds, _manifest/expected_partitions]
-    limitation: Manifest does not cover ERP CDC.
+    limitation: >
+      Manifest does not cover ERP CDC. A manifest partition with no file on
+      disk is reported as a row mismatch.
     sql: metrics/q08_missing_days.sql
 
   - id: dispatch_on_request_proxy
@@ -121,7 +133,7 @@ queries:
   - id: q01_gross_sales_by_channel
     description: Gross sales by as-of outlet channel for a fiscal year and quarter
     sql: metrics/q01_gross_sales_by_channel.sql
-    source: fct_sales_daily
+    source: fct_pos_line
     params: [fy, quarter]
 
   - id: q02_finance_recon

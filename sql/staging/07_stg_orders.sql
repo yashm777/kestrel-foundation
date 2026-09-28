@@ -1,3 +1,6 @@
+-- Current order header. The attribute row is the latest I/U by (__op_ts, __seq).
+-- A hard delete tombstones the order when that delete has the highest __seq.
+-- Order deletes copy the insert's __op_ts, so time-order alone would resurrect them.
 CREATE OR REPLACE TABLE stg_orders AS
 WITH parsed AS (
   SELECT
@@ -18,6 +21,12 @@ WITH parsed AS (
     strptime(replace(CAST(__op_ts AS VARCHAR), 'Z', ''), '%Y-%m-%dT%H:%M:%S') AS op_ts
   FROM raw_orders
 ),
+tombstone AS (
+  SELECT order_number
+  FROM parsed
+  GROUP BY order_number
+  HAVING max(__seq) = max(CASE WHEN __op = 'D' THEN __seq END)
+),
 latest AS (
   SELECT * EXCLUDE (rn)
   FROM (
@@ -25,12 +34,13 @@ latest AS (
       *,
       row_number() OVER (PARTITION BY order_number ORDER BY op_ts DESC, __seq DESC) AS rn
     FROM parsed
+    WHERE __op <> 'D'
+      AND order_number NOT IN (SELECT order_number FROM tombstone)
   )
   WHERE rn = 1
 )
 SELECT * EXCLUDE (__op, __seq)
-FROM latest
-WHERE __op <> 'D';
+FROM latest;
 
 CREATE OR REPLACE TABLE dq_order_source_profile AS
 SELECT

@@ -9,4 +9,5 @@ FROM dim_outlet_scd2 a
 JOIN dim_outlet_scd2 b
   ON a.outlet_code = b.outlet_code
  AND a.valid_to = b.valid_from
+ AND a.valid_from < b.valid_from
 WHERE a.channel IS DISTINCT FROM b.channel;

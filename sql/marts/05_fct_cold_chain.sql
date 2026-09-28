@@ -1,5 +1,6 @@
--- Trip is a derived proxy: vehicle + route + IST business date after clock correction.
--- Same vehicle/route twice in one day collapses. There is no trip_id in the feed.
+-- Trip proxy: vehicle + route + corrected device-clock date. This is not IST.
+-- route_code changes on nearly every reading, so most keys are a single reading.
+-- There is no trip_id. Do not read this grain as a vehicle-day.
 CREATE OR REPLACE TABLE fct_cold_chain_trip AS
 SELECT
   trip_key,

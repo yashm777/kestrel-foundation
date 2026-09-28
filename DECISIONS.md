@@ -15,7 +15,7 @@ A dashboard or Streamlit. An LLM. Spark/dbt. Product SCD2 (no KPI needs historic
 Canonical gross sales is POS `qty * unit_price` (tax exclusive), grain `txn_id + txn_line_no` after exact-duplicate drop.
 
 - Business date is Asia/Kolkata from UTC `event_ts`, never `ingest_date`.
-- Channel for the number the business should use is the outlet record valid at event time.
+- Channel for the number the business should use is the outlet record valid at event time. If none covers the event, q01 uses `till_channel` (about 0.5% of lines).
 - `till_channel` is kept so Finance recon isolates date and duplicate effects from SCD2.
 - ERP headers are orders, not sales.
 
@@ -41,16 +41,21 @@ Clock correction is `observed_offset_hours` from `dq_firmware_clock` (firmware m
 
 - KPI excursion is **above 8°C**, as the contract.
 - `outside_band_flag` is stored, not the published KPI.
-- Trip key is vehicle + route + business date — a proxy; two same-day rotations collapse.
-- Q4 is month × warehouse × vendor.
+- The key is vehicle + route + corrected device-clock date (not IST). `route_code` changes on nearly every reading, so this is a reading-level rate (~7%), not a vehicle-day rate (~75%).
+- "About a third" matches Fahrenheit left unconverted. COLDEYE is about a third of devices.
+- Q4 is month × warehouse × vendor. There is no `carrier_id`.
 
 ## CDC
 
-Current/as-of state is `__op_ts`, `__seq`. Last row in the latest extract file is wrong (late extracts, tied timestamps). Deletes tombstone.
+Current state is `__op_ts`, then `__seq`. Last row in the latest extract file is wrong (late extracts, tied timestamps). A same-timestamp pair does not create a zero-length outlet version; `__seq` keeps the later row.
+
+A delete tombstones the key when that delete has the highest `__seq`. Order deletes copy the insert timestamp, so time-order alone would resurrect all 2,880 of them. A later outlet update after a real delete is a new version.
 
 ## Service
 
 `fct_dispatch_on_request` is a dispatch-on-request-date **proxy** with coverage. It is not OTIF.
+
+`q05` is not a usable dock-to-dispatch time. Scans that share an `order_number` span a median of about 395 days and about four warehouses, so the median (~3,700 hours) is an artefact. Read `coverage_pct` (~15%). `q10` uses the same weak link.
 
 ## Assumptions
 
@@ -70,8 +75,12 @@ Scale-1 landing zone, not from generator comments.
 - GW-017 is missing on 2026-02-11 and 2026-02-12 only.
 - Truncated file: `reefer_telemetry/dt=2025-07-14/part-00000`.
 - PARTNER_API mean order value is ~8.6–8.9% above SFA/ERP.
-- Above-8°C trip rate is ~7%, not “a third”; outside-band is ~28% — which is why the KPI follows the contract, not both flags.
+- Above-8°C rate is ~7% at reading grain and ~28% outside the 2–8 band. Unconverted Fahrenheit is ~38%.
 - Pre-drift POS is ~half of lines and cannot convert to eaches.
+
+## Next two weeks
+
+Partition-pruned incremental runs, a schema-drift alarm when a renamed column is not in the staging map, and quarantine plus replay for an unreadable file.
 
 ## What breaks first
 

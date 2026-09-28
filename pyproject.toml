@@ -8,11 +8,11 @@ version = "0.1.0"
 description = "Kestrel Provisions analytical foundation"
 requires-python = ">=3.10"
 dependencies = [
-  "duckdb>=1.0",
-  "pyarrow",
-  "pandas",
-  "numpy",
-  "pyyaml",
+  "duckdb==1.5.5",
+  "pyarrow==25.0.1",
+  "pandas==3.0.3",
+  "numpy==2.5.3",
+  "pyyaml==6.0.3",
 ]
 
 [project.scripts]

@@ -1,16 +1,26 @@
+-- Start from the manifest so a partition with no file on disk is still a row.
 CREATE OR REPLACE TABLE dq_partition_recon AS
+WITH observed AS (
+  SELECT
+    feed,
+    partition,
+    count(*) AS observed_files,
+    coalesce(sum(CASE WHEN read_status = 'OK' THEN actual_rows ELSE 0 END), 0) AS observed_rows_ok,
+    count(*) FILTER (WHERE read_status <> 'OK') AS corrupt_files
+  FROM file_inventory
+  GROUP BY feed, partition
+)
 SELECT
-  i.feed,
-  i.partition,
-  any_value(m.file_count) AS manifest_files,
-  any_value(m.row_count) AS manifest_rows,
-  count(*) AS observed_files,
-  coalesce(sum(CASE WHEN i.read_status = 'OK' THEN i.actual_rows ELSE 0 END), 0) AS observed_rows_ok,
-  count(*) FILTER (WHERE i.read_status <> 'OK') AS corrupt_files
-FROM file_inventory i
-LEFT JOIN ingest_manifest m
-  ON i.feed = m.feed AND i.partition = m.partition
-GROUP BY i.feed, i.partition;
+  coalesce(o.feed, m.feed) AS feed,
+  coalesce(o.partition, m.partition) AS partition,
+  m.file_count AS manifest_files,
+  m.row_count AS manifest_rows,
+  coalesce(o.observed_files, 0) AS observed_files,
+  coalesce(o.observed_rows_ok, 0) AS observed_rows_ok,
+  coalesce(o.corrupt_files, 0) AS corrupt_files
+FROM ingest_manifest m
+FULL OUTER JOIN observed o
+  ON o.feed = m.feed AND o.partition = m.partition;
 
 CREATE OR REPLACE TABLE dq_affected_partitions AS
 SELECT path, feed, partition, bytes, actual_rows, read_status, error

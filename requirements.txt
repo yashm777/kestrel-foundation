@@ -1,6 +1,6 @@
-duckdb>=1.0
-pyarrow
-pandas
-numpy
-pyyaml
-pytest
+duckdb==1.5.5
+pyarrow==25.0.1
+pandas==3.0.3
+numpy==2.5.3
+pyyaml==6.0.3
+pytest==9.1.1
