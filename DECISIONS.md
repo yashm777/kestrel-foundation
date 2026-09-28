@@ -73,10 +73,6 @@ Scale-1 landing zone, not from generator comments.
 - Above-8°C trip rate is ~7%, not “a third”; outside-band is ~28% — which is why the KPI follows the contract, not both flags.
 - Pre-drift POS is ~half of lines and cannot convert to eaches.
 
-## Next two weeks
-
-Partition-pruned incremental runs, schema-drift alarms, quarantine/replay for bad files.
-
 ## What breaks first
 
 At 10×, a full `raw_telemetry` scan in one DuckDB process. At 100×, laptop memory on POS as-of and telemetry. Fix: predicate on Hive partitions, spill, then a warehouse. Schema drift is handled with `union_by_name` plus an explicit `coalesce(qty, quantity_units)` map; a third rename still needs a line in staging.
